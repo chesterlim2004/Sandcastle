@@ -50,6 +50,8 @@ const toLocalDatetimeInput = (value: string | Date) => {
   const date = new Date(value);
   const offset = date.getTimezoneOffset() * 60000;
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+};
+
 const isAmountDraft = (rawValue: string) => {
   if (rawValue.includes('-') || rawValue.includes('+')) {
     return false;
