@@ -19,6 +19,12 @@ const TransactionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-TransactionSchema.index({ userId: 1, messageId: 1 }, { unique: true, sparse: true });
+TransactionSchema.index(
+  { userId: 1, messageId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { messageId: { $exists: true, $ne: null } },
+  }
+);
 
 export default mongoose.model('Transaction', TransactionSchema);

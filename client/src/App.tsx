@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   DndContext,
   DragEndEvent,
@@ -50,6 +50,19 @@ const toLocalDatetimeInput = (value: string | Date) => {
   const date = new Date(value);
   const offset = date.getTimezoneOffset() * 60000;
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+const isAmountDraft = (rawValue: string) => {
+  if (rawValue.includes('-') || rawValue.includes('+')) {
+    return false;
+  }
+  return rawValue === '' || /^(0(\.\d{0,2})?|[1-9]\d*(\.\d{0,2})?)$/.test(rawValue);
+};
+
+const parsePositiveAmount = (rawValue: string) => {
+  if (!/^(0\.(?:[1-9]\d?|0[1-9])|[1-9]\d*(\.\d{1,2})?)$/.test(rawValue)) {
+    return null;
+  }
+  const next = Number(rawValue);
+  return Number.isFinite(next) && next > 0 ? next : null;
 };
 
 function App() {
@@ -62,8 +75,19 @@ function App() {
   const [isComposeOpen, setComposeOpen] = useState(false);
   const [isCategoryComposerOpen, setCategoryComposerOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [toasts, setToasts] = useState<{ id: number; message: string }[]>([]);
+  const toastIdRef = useRef(0);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
+  const pushToast = (message: string) => {
+    const id = toastIdRef.current + 1;
+    toastIdRef.current = id;
+    setToasts((prev) => [...prev, { id, message }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    }, 2400);
+  };
 
   useEffect(() => {
     const init = async () => {
@@ -154,11 +178,13 @@ function App() {
   const handleCreateCategory = async (payload: Pick<Category, 'name' | 'color'>) => {
     const created = await createCategory(payload);
     setCategories((prev) => [...prev, created]);
+    pushToast('Category added.');
   };
 
   const handleDeleteCategory = async (id: string) => {
     await deleteCategory(id);
     setCategories((prev) => prev.filter((item) => item._id !== id));
+    pushToast('Category deleted.');
   };
 
   const handlePreviewCategory = (id: string, patch: Partial<Category>) => {
@@ -241,6 +267,18 @@ function App() {
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       <div className="min-h-screen flex">
+        {toasts.length > 0 && (
+          <div className="fixed top-6 right-6 z-50 flex flex-col gap-2">
+            {toasts.map((toast) => (
+              <div
+                key={toast.id}
+                className="bg-ink text-white text-sm px-4 py-2 rounded-full shadow-lg"
+              >
+                {toast.message}
+              </div>
+            ))}
+          </div>
+        )}
         <Sidebar
           user={user}
           categories={categories}
@@ -291,7 +329,12 @@ function App() {
               />
             )}
             {view.type === 'budget' && (
-              <BudgetPanel budget={budget} onUpdate={handleBudgetChange} transactions={transactions} />
+              <BudgetPanel
+                budget={budget}
+                onUpdate={handleBudgetChange}
+                transactions={transactions}
+                categories={categories}
+              />
             )}
           </main>
         </div>
@@ -301,6 +344,7 @@ function App() {
             onClose={() => setComposeOpen(false)}
             onSubmit={async (payload) => {
               await createTransaction(payload);
+              pushToast('Transaction added.');
               if (view.type === 'unsorted' || view.type === 'category') {
                 const list = await fetchTransactions(
                   view.type === 'category' ? view.id : 'unsorted'
@@ -331,7 +375,7 @@ function Topbar({
     <header className="flex items-center justify-between px-8 py-5 border-b border-white/60 backdrop-blur">
       <div>
         <h1 className="font-display text-2xl">Sandcastle</h1>
-        <p className="text-sm text-slate-500">Gmail-style budget tracking</p>
+        <p className="text-sm text-slate-500">Automated budget tracking</p>
       </div>
       <div className="flex items-center gap-4">
         <div className="text-right">
@@ -566,14 +610,23 @@ function TransactionRow({
   onUpdate: (id: string, payload: Partial<Transaction>) => Promise<Transaction>;
 }) {
   const [local, setLocal] = useState(txn);
+  const [amountInput, setAmountInput] = useState(String(txn.amount));
   const handleEnterBlur = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {
       event.currentTarget.blur();
     }
   };
 
+  useEffect(() => {
+    setLocal(txn);
+    setAmountInput(String(txn.amount));
+  }, [txn]);
+
   const update = async (patch: Partial<Transaction>) => {
     setLocal((prev) => ({ ...prev, ...patch }));
+    if (patch.amount !== undefined) {
+      setAmountInput(String(patch.amount));
+    }
     await onUpdate(txn._id, patch);
   };
 
@@ -590,10 +643,29 @@ function TransactionRow({
           />
           <input
             className="border border-slate-200 rounded-lg px-3 py-2"
-            value={local.amount}
-            onChange={(e) => setLocal({ ...local, amount: Number(e.target.value) })}
+            value={amountInput}
+            type="number"
+            inputMode="decimal"
+            min="0.01"
+            step="0.01"
+            onChange={(e) => {
+              const nextValue = e.target.value;
+              if (!isAmountDraft(nextValue)) return;
+              setAmountInput(nextValue);
+              const parsed = parsePositiveAmount(nextValue);
+              if (parsed !== null) {
+                setLocal({ ...local, amount: parsed });
+              }
+            }}
             onKeyDown={handleEnterBlur}
-            onBlur={() => update({ amount: local.amount })}
+            onBlur={() => {
+              const parsed = parsePositiveAmount(amountInput);
+              if (parsed === null) {
+                setAmountInput(String(local.amount));
+                return;
+              }
+              void update({ amount: parsed });
+            }}
           />
           <input
             className="border border-slate-200 rounded-lg px-3 py-2"
@@ -783,48 +855,160 @@ function BudgetPanel({
   budget,
   onUpdate,
   transactions,
+  categories,
 }: {
   budget: number;
   onUpdate: (value: number) => void;
   transactions: Transaction[];
+  categories: Category[];
 }) {
   const [value, setValue] = useState(budget);
+  const [valueInput, setValueInput] = useState(budget ? String(budget) : '');
 
   const spent = transactions.reduce((sum, item) => sum + item.amount, 0);
   const remaining = Math.max(value - spent, 0);
   const percent = value > 0 ? Math.min((spent / value) * 100, 100) : 0;
+  const categoryMap = useMemo(() => new Map(categories.map((item) => [item._id, item])), [
+    categories,
+  ]);
+  const breakdown = useMemo(() => {
+    const totals = new Map<string, { name: string; color: string; total: number }>();
+
+    transactions.forEach((item) => {
+      if (item.amount <= 0 || !item.categoryId) return;
+      const category = categoryMap.get(item.categoryId);
+      if (!category) return;
+      const current = totals.get(item.categoryId);
+      totals.set(item.categoryId, {
+        name: category.name,
+        color: category.color,
+        total: (current?.total || 0) + item.amount,
+      });
+    });
+
+    return Array.from(totals.values()).sort((a, b) => b.total - a.total);
+  }, [transactions, categoryMap]);
+  const totalSpent = breakdown.reduce((sum, item) => sum + item.total, 0);
 
   useEffect(() => {
     setValue(budget);
+    setValueInput(budget ? String(budget) : '');
   }, [budget]);
 
+  const parsedBudget = parsePositiveAmount(valueInput);
+
   return (
-    <section className="card-surface rounded-3xl p-6 shadow-float fade-in">
-      <h2 className="font-display text-2xl mb-2">Monthly Budget</h2>
-      <p className="text-sm text-slate-500 mb-6">Adjust anytime. We auto-track remaining funds.</p>
+    <section className="card-surface rounded-3xl p-6 shadow-float fade-in text-base">
+      <h2 className="font-display text-3xl mb-2">Monthly Budget</h2>
+      <p className="text-base text-slate-500 mb-6">Adjust anytime. We auto-track remaining funds.</p>
       <div className="flex items-center gap-3 mb-6">
         <input
           className="border border-slate-200 rounded-lg px-3 py-2 w-40"
           type="number"
-          value={value}
-          onChange={(e) => setValue(Number(e.target.value))}
+          value={valueInput}
+          inputMode="decimal"
+          min="0.01"
+          step="0.01"
+          onChange={(e) => {
+            const nextValue = e.target.value;
+            if (!isAmountDraft(nextValue)) return;
+            setValueInput(nextValue);
+            const parsed = parsePositiveAmount(nextValue);
+            if (parsed !== null) {
+              setValue(parsed);
+            }
+          }}
+          onBlur={() => {
+            if (parsedBudget === null) {
+              setValueInput(value ? String(value) : '');
+              return;
+            }
+            setValue(parsedBudget);
+            setValueInput(String(parsedBudget));
+          }}
         />
         <button
           className="px-4 py-2 rounded-full bg-leaf text-white text-sm"
           onClick={() => onUpdate(value)}
+          disabled={parsedBudget === null}
         >
           Update budget
         </button>
       </div>
       <div className="bg-white/70 rounded-2xl p-5 border border-white/70">
-        <div className="flex items-center justify-between text-sm mb-2">
+        <div className="flex items-center justify-between text-base mb-2">
           <span>Spent: SGD {spent.toFixed(2)}</span>
           <span>Remaining: SGD {remaining.toFixed(2)}</span>
         </div>
         <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
           <div className="h-full bg-tide" style={{ width: `${percent}%` }} />
         </div>
-        <p className="text-xs text-slate-500 mt-2">{percent.toFixed(1)}% used</p>
+        <p className="text-sm text-slate-500 mt-2">{percent.toFixed(1)}% used</p>
+      </div>
+      <div className="bg-white/70 rounded-2xl p-5 border border-white/70 mt-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold">Spending by category</h3>
+          <span className="text-sm text-slate-500">Total SGD {totalSpent.toFixed(2)}</span>
+        </div>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+          <div className="relative w-72 h-72 shrink-0">
+            <svg viewBox="0 0 200 200" className="w-full h-full">
+              <circle cx="100" cy="100" r="90" fill="none" stroke="#e2e8f0" strokeWidth="22" />
+              {(() => {
+                const radius = 90;
+                const circumference = 2 * Math.PI * radius;
+                let offset = 0;
+                return breakdown.map((item) => {
+                  const sliceLength = totalSpent > 0 ? (item.total / totalSpent) * circumference : 0;
+                  const strokeDasharray = `${sliceLength} ${circumference - sliceLength}`;
+                  const circle = (
+                    <circle
+                      key={item.name}
+                      cx="100"
+                      cy="100"
+                      r={radius}
+                      fill="none"
+                      stroke={item.color}
+                      strokeWidth="22"
+                      strokeDasharray={strokeDasharray}
+                      strokeDashoffset={-offset}
+                      strokeLinecap="butt"
+                      transform="rotate(-90 100 100)"
+                    />
+                  );
+                  offset += sliceLength;
+                  return circle;
+                });
+              })()}
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center text-base font-semibold text-slate-600">
+              {totalSpent > 0 ? `${totalSpent.toFixed(2)} SGD` : 'No spend'}
+            </div>
+          </div>
+          <div className="flex-1 grid gap-2 text-base">
+            {breakdown.length === 0 ? (
+              <p className="text-slate-500">No categorized spending yet.</p>
+            ) : (
+              breakdown.map((item) => {
+                const share = totalSpent > 0 ? (item.total / totalSpent) * 100 : 0;
+                return (
+                  <div key={item.name} className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-3 w-3 rounded-full"
+                        style={{ backgroundColor: item.color }}
+                      />
+                      <span>{item.name}</span>
+                    </div>
+                    <div className="text-slate-500">
+                      {share.toFixed(1)}% · SGD {item.total.toFixed(2)}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -841,12 +1025,13 @@ function ComposeModal({
 }) {
   const [form, setForm] = useState({
     name: '',
-    amount: 0,
-    occurredAt: toLocalDatetimeInput(new Date()),
+    amount: '',
+    occurredAt: new Date().toISOString().slice(0, 16),
     categoryId: '',
   });
 
-  const canSubmit = form.name && form.amount > 0 && form.categoryId;
+  const parsedAmount = parsePositiveAmount(form.amount);
+  const canSubmit = form.name && parsedAmount && form.categoryId;
 
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black/40 z-50">
@@ -869,7 +1054,20 @@ function ComposeModal({
             type="number"
             placeholder="Amount"
             value={form.amount}
-            onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })}
+            inputMode="decimal"
+            min="0.01"
+            step="0.01"
+            onChange={(e) => {
+              const nextValue = e.target.value;
+              if (!isAmountDraft(nextValue)) return;
+              setForm({ ...form, amount: nextValue });
+            }}
+            onBlur={(e) => {
+              const parsed = parsePositiveAmount(e.target.value);
+              if (parsed === null) {
+                setForm((prev) => ({ ...prev, amount: '' }));
+              }
+            }}
           />
           <input
             className="border border-slate-200 rounded-lg px-3 py-2 w-full"
@@ -896,7 +1094,10 @@ function ComposeModal({
           </button>
           <button
             className="px-4 py-2 rounded-full bg-tide text-white"
-            onClick={() => onSubmit(form)}
+            onClick={() => {
+              if (!parsedAmount) return;
+              onSubmit({ ...form, amount: parsedAmount });
+            }}
             disabled={!canSubmit}
           >
             Add transaction

@@ -70,12 +70,26 @@ export async function fetchTransactions(categoryId: string | 'unsorted' | null) 
 }
 
 export async function createTransaction(payload: Partial<Transaction>) {
-  const res = await api.post('/api/transactions', payload);
+  const normalized =
+    payload.amount !== undefined
+      ? {
+          ...payload,
+          amount: typeof payload.amount === 'string' ? Number(payload.amount) : payload.amount,
+        }
+      : payload;
+  const res = await api.post('/api/transactions', normalized);
   return res.data.transaction as Transaction;
 }
 
 export async function updateTransaction(id: string, payload: Partial<Transaction>) {
-  const res = await api.patch(`/api/transactions/${id}`, payload);
+  const normalized =
+    payload.amount !== undefined
+      ? {
+          ...payload,
+          amount: typeof payload.amount === 'string' ? Number(payload.amount) : payload.amount,
+        }
+      : payload;
+  const res = await api.patch(`/api/transactions/${id}`, normalized);
   return res.data.transaction as Transaction;
 }
 
