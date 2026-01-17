@@ -14,9 +14,15 @@ export function parseGmailTransaction(message) {
     return null;
   }
   const amountMatch = content.match(amountRegex);
-  const amount = amountMatch ? Number(amountMatch[2]) : null;
+  const amount = amountMatch
+    ? Math.round(Number.parseFloat(amountMatch[2]) * 100) / 100
+    : null;
 
-  const occurredAt = dateHeader ? new Date(dateHeader) : new Date();
+  const occurredAt = message.internalDate
+    ? new Date(Number(message.internalDate))
+    : dateHeader
+      ? new Date(dateHeader)
+      : new Date();
   const name = subject || 'Gmail import';
 
   return {

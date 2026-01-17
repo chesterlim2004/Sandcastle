@@ -8,6 +8,13 @@ import {
   useDraggable,
   useDroppable,
 } from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import clsx from 'clsx';
 
 import {
@@ -27,6 +34,7 @@ import {
   importGmail,
   logout,
   moveTransaction,
+  reorderCategories,
   updateBudget,
   updateCategory,
   updateTransaction,
@@ -38,6 +46,12 @@ type ViewState =
   | { type: 'budget' }
   | { type: 'category'; id: string };
 
+const toLocalDatetimeInput = (value: string | Date) => {
+  const date = new Date(value);
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+};
+
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,6 +60,7 @@ function App() {
   const [budget, setBudget] = useState(0);
   const [view, setView] = useState<ViewState>({ type: 'unsorted' });
   const [isComposeOpen, setComposeOpen] = useState(false);
+  const [isCategoryComposerOpen, setCategoryComposerOpen] = useState(false);
   const [importing, setImporting] = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -94,6 +109,29 @@ function App() {
     const { active, over } = event;
     if (!over) return;
 
+    if (active.id.toString().startsWith('category-')) {
+      const activeId = active.id.toString();
+      const overId = over.id.toString();
+      if (activeId === overId) return;
+
+      const oldIndex = categories.findIndex((item) => `category-${item._id}` === activeId);
+      const newIndex = categories.findIndex((item) => `category-${item._id}` === overId);
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const next = arrayMove(categories, oldIndex, newIndex).map((item, index) => ({
+        ...item,
+        order: index,
+      }));
+      const prev = categories;
+      setCategories(next);
+      try {
+        await reorderCategories(next.map((item, index) => ({ id: item._id, order: index })));
+      } catch (err) {
+        setCategories(prev);
+      }
+      return;
+    }
+
     const transactionId = active.id.toString().replace('txn-', '');
     const dropTarget = over.id.toString();
     if (!dropTarget.startsWith('category-')) return;
@@ -113,17 +151,20 @@ function App() {
     }
   };
 
-  const handleCreateCategory = async () => {
-    const name = window.prompt('Category name');
-    if (!name) return;
-    const color = window.prompt('Hex color', '#e66b4f') || '#e66b4f';
-    const created = await createCategory({ name, color });
+  const handleCreateCategory = async (payload: Pick<Category, 'name' | 'color'>) => {
+    const created = await createCategory(payload);
     setCategories((prev) => [...prev, created]);
   };
 
   const handleDeleteCategory = async (id: string) => {
     await deleteCategory(id);
     setCategories((prev) => prev.filter((item) => item._id !== id));
+  };
+
+  const handlePreviewCategory = (id: string, patch: Partial<Category>) => {
+    setCategories((prev) =>
+      prev.map((item) => (item._id === id ? { ...item, ...patch } : item))
+    );
   };
 
   const handleBudgetChange = async (value: number) => {
@@ -133,7 +174,21 @@ function App() {
 
   const handleUpdateTransaction = async (id: string, payload: Partial<Transaction>) => {
     const updated = await updateTransaction(id, payload);
-    setTransactions((prev) => prev.map((item) => (item._id === id ? updated : item)));
+    setTransactions((prev) => {
+      if (view.type === 'unsorted') {
+        if (updated.categoryId) {
+          return prev.filter((item) => item._id !== id);
+        }
+        return prev.map((item) => (item._id === id ? updated : item));
+      }
+      if (view.type === 'category') {
+        if (updated.categoryId !== view.id) {
+          return prev.filter((item) => item._id !== id);
+        }
+        return prev.map((item) => (item._id === id ? updated : item));
+      }
+      return prev.map((item) => (item._id === id ? updated : item));
+    });
     return updated;
   };
 
@@ -153,6 +208,11 @@ function App() {
   const handleLogout = async () => {
     await logout();
     setUser(null);
+  };
+
+  const openCategoryComposer = () => {
+    setView({ type: 'categories' });
+    setCategoryComposerOpen(true);
   };
 
   if (loading) {
@@ -187,7 +247,7 @@ function App() {
           view={view}
           onViewChange={setView}
           onAdd={() => setComposeOpen(true)}
-          onAddCategory={handleCreateCategory}
+          onAddCategory={openCategoryComposer}
         />
         <div className="flex-1 flex flex-col">
           <Topbar
@@ -202,7 +262,6 @@ function App() {
                 title="Unsorted"
                 subtitle="Recent Gmail imports live here until you categorize them."
                 transactions={transactions}
-                categories={categories}
                 onUpdate={handleUpdateTransaction}
                 onImport={handleImport}
                 importing={importing}
@@ -213,7 +272,6 @@ function App() {
                 title={categoryMap.get(view.id)?.name || 'Category'}
                 subtitle="Drag items here from Unsorted or edit inline."
                 transactions={transactions}
-                categories={categories}
                 onUpdate={handleUpdateTransaction}
               />
             )}
@@ -226,6 +284,10 @@ function App() {
                   setCategories((prev) => prev.map((item) => (item._id === id ? updated : item)));
                 }}
                 onDelete={handleDeleteCategory}
+                onPreview={handlePreviewCategory}
+                createOpen={isCategoryComposerOpen}
+                onOpenCreate={() => setCategoryComposerOpen(true)}
+                onCloseCreate={() => setCategoryComposerOpen(false)}
               />
             )}
             {view.type === 'budget' && (
@@ -346,17 +408,20 @@ function Sidebar({
           >
             Categories
           </button>
-          <div className="mt-3 space-y-2">
-            {categories.map((category) => (
-              <SidebarItem
-                key={category._id}
-                label={category.name}
-                color={category.color}
-                active={view.type === 'category' && view.id === category._id}
-                onClick={() => onViewChange({ type: 'category', id: category._id })}
-                droppableId={`category-${category._id}`}
-              />
-            ))}
+        <div className="mt-3 space-y-2">
+            <SortableContext
+              items={categories.map((category) => `category-${category._id}`)}
+              strategy={verticalListSortingStrategy}
+            >
+              {categories.map((category) => (
+                <SortableCategoryItem
+                  key={category._id}
+                  category={category}
+                  active={view.type === 'category' && view.id === category._id}
+                  onClick={() => onViewChange({ type: 'category', id: category._id })}
+                />
+              ))}
+            </SortableContext>
             <button
               className="text-sm text-slate-500 hover:text-slate-700"
               onClick={onAddCategory}
@@ -408,11 +473,51 @@ function SidebarItem({
   );
 }
 
+function SortableCategoryItem({
+  category,
+  active,
+  onClick,
+}: {
+  category: Category;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } =
+    useSortable({
+      id: `category-${category._id}`,
+    });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={isOver ? 'ring-2 ring-tide/60 rounded-xl' : ''}
+    >
+      <button
+        onClick={onClick}
+        className={clsx(
+          'w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left transition',
+          active ? 'bg-white shadow' : 'hover:bg-white/60'
+        )}
+        {...attributes}
+        {...listeners}
+      >
+        <span className="h-2.5 w-2.5 rounded-full" style={{ background: category.color }} />
+        <span className="text-sm font-medium">{category.name}</span>
+      </button>
+    </div>
+  );
+}
+
 function TransactionPanel({
   title,
   subtitle,
   transactions,
-  categories,
   onUpdate,
   onImport,
   importing,
@@ -420,7 +525,6 @@ function TransactionPanel({
   title: string;
   subtitle: string;
   transactions: Transaction[];
-  categories: Category[];
   onUpdate: (id: string, payload: Partial<Transaction>) => Promise<Transaction>;
   onImport?: () => void;
   importing?: boolean;
@@ -447,7 +551,7 @@ function TransactionPanel({
           <p className="text-sm text-slate-500">No transactions yet.</p>
         )}
         {transactions.map((txn) => (
-          <TransactionRow key={txn._id} txn={txn} categories={categories} onUpdate={onUpdate} />
+          <TransactionRow key={txn._id} txn={txn} onUpdate={onUpdate} />
         ))}
       </div>
     </section>
@@ -456,11 +560,9 @@ function TransactionPanel({
 
 function TransactionRow({
   txn,
-  categories,
   onUpdate,
 }: {
   txn: Transaction;
-  categories: Category[];
   onUpdate: (id: string, payload: Partial<Transaction>) => Promise<Transaction>;
 }) {
   const [local, setLocal] = useState(txn);
@@ -495,24 +597,12 @@ function TransactionRow({
           />
           <input
             className="border border-slate-200 rounded-lg px-3 py-2"
-            value={new Date(local.occurredAt).toISOString().slice(0, 16)}
+            value={toLocalDatetimeInput(local.occurredAt)}
             type="datetime-local"
             onChange={(e) => setLocal({ ...local, occurredAt: e.target.value })}
             onKeyDown={handleEnterBlur}
             onBlur={() => update({ occurredAt: local.occurredAt })}
           />
-          <select
-            className="border border-slate-200 rounded-lg px-3 py-2"
-            value={local.categoryId || ''}
-            onChange={(e) => update({ categoryId: e.target.value || null })}
-          >
-            <option value="">Unsorted</option>
-            {categories.map((category) => (
-              <option key={category._id} value={category._id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
         </div>
         <div className="grid md:grid-cols-[1fr_1fr] gap-3">
           <input
@@ -542,12 +632,28 @@ function CategoryManager({
   onCreate,
   onUpdate,
   onDelete,
+  onPreview,
+  createOpen,
+  onOpenCreate,
+  onCloseCreate,
 }: {
   categories: Category[];
-  onCreate: () => void;
+  onCreate: (payload: Pick<Category, 'name' | 'color'>) => void;
   onUpdate: (id: string, payload: Partial<Category>) => void;
   onDelete: (id: string) => void;
+  onPreview: (id: string, payload: Partial<Category>) => void;
+  createOpen: boolean;
+  onOpenCreate: () => void;
+  onCloseCreate: () => void;
 }) {
+  const [draft, setDraft] = useState({ name: '', color: '#e66b4f' });
+
+  useEffect(() => {
+    if (createOpen) {
+      setDraft({ name: '', color: '#e66b4f' });
+    }
+  }, [createOpen]);
+
   return (
     <section className="card-surface rounded-3xl p-6 shadow-float fade-in">
       <div className="flex items-center justify-between mb-6">
@@ -557,17 +663,54 @@ function CategoryManager({
         </div>
         <button
           className="px-4 py-2 rounded-full border border-slate-300 text-sm"
-          onClick={onCreate}
+          onClick={onOpenCreate}
         >
           Add Category
         </button>
       </div>
+      {createOpen && (
+        <div className="bg-white/80 rounded-2xl p-4 border border-white/70 mb-6">
+          <div className="grid md:grid-cols-[2fr_1fr_auto] gap-3 items-center">
+            <input
+              className="border border-slate-200 rounded-lg px-3 py-2"
+              placeholder="Category name"
+              value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            />
+            <input
+              className="border border-slate-200 rounded-lg px-3 py-2 h-11"
+              type="color"
+              value={draft.color}
+              onChange={(e) => setDraft({ ...draft, color: e.target.value })}
+            />
+            <div className="flex items-center gap-2">
+              <button
+                className="px-3 py-2 rounded-full bg-tide text-white text-sm"
+                onClick={() => {
+                  if (!draft.name.trim()) return;
+                  onCreate({ name: draft.name.trim(), color: draft.color });
+                  onCloseCreate();
+                }}
+              >
+                Save
+              </button>
+              <button
+                className="px-3 py-2 rounded-full border border-slate-300 text-sm"
+                onClick={onCloseCreate}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="space-y-3">
         {categories.map((category) => (
           <CategoryRow
             key={category._id}
             category={category}
             onUpdate={onUpdate}
+            onPreview={onPreview}
             onDelete={onDelete}
           />
         ))}
@@ -579,10 +722,12 @@ function CategoryManager({
 function CategoryRow({
   category,
   onUpdate,
+  onPreview,
   onDelete,
 }: {
   category: Category;
   onUpdate: (id: string, payload: Partial<Category>) => void;
+  onPreview: (id: string, payload: Partial<Category>) => void;
   onDelete: (id: string) => void;
 }) {
   const [local, setLocal] = useState(category);
@@ -602,7 +747,11 @@ function CategoryRow({
         <input
           className="border border-slate-200 rounded-lg px-3 py-2"
           value={local.name}
-          onChange={(e) => setLocal({ ...local, name: e.target.value })}
+          onChange={(e) => {
+            const next = { ...local, name: e.target.value };
+            setLocal(next);
+            onPreview(category._id, { name: next.name });
+          }}
           onKeyDown={handleEnterBlur}
           onBlur={() => onUpdate(category._id, { name: local.name })}
         />
@@ -610,7 +759,12 @@ function CategoryRow({
           className="border border-slate-200 rounded-lg px-3 py-2"
           type="color"
           value={local.color}
-          onChange={(e) => setLocal({ ...local, color: e.target.value })}
+          style={{ backgroundColor: local.color }}
+          onChange={(e) => {
+            const next = { ...local, color: e.target.value };
+            setLocal(next);
+            onPreview(category._id, { color: next.color });
+          }}
           onKeyDown={handleEnterBlur}
           onBlur={() => onUpdate(category._id, { color: local.color })}
         />
@@ -688,7 +842,7 @@ function ComposeModal({
   const [form, setForm] = useState({
     name: '',
     amount: 0,
-    occurredAt: new Date().toISOString().slice(0, 16),
+    occurredAt: toLocalDatetimeInput(new Date()),
     categoryId: '',
   });
 
