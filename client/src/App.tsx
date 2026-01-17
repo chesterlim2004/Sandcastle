@@ -634,7 +634,7 @@ function TransactionRow({
 
   return (
     <Draggable id={`txn-${txn._id}`}>
-      <div className="bg-white/80 rounded-2xl p-4 flex flex-col gap-3 border border-white/70">
+      <div className="bg-white/80 rounded-2xl p-4 flex flex-col gap-3 border border-slate-300/80">
         <div className="grid md:grid-cols-[2fr_1fr_1fr_1fr] gap-3">
           <input
             className="border border-slate-200 rounded-lg px-3 py-2"
