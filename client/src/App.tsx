@@ -751,16 +751,6 @@ function BudgetPanel({
       <p className="text-base text-slate-500 mb-6">Adjust anytime. We auto-track remaining funds.</p>
       <div className="flex items-center gap-3 mb-6">
         <input
-          className="border border-slate-200 rounded-lg px-3 py-2 w-48"
-          type="text"
-          inputMode="decimal"
-          placeholder="0"
-          value={value === 0 ? '' : value}
-          onChange={(e) => {
-            const next = e.target.value;
-            setValue(next === '' ? 0 : Number(next));
-          }}
-        />
           className="border border-slate-200 rounded-lg px-3 py-2 w-40"
           type="number"
           value={valueInput}
