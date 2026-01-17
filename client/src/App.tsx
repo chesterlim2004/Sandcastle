@@ -269,7 +269,12 @@ function App() {
               />
             )}
             {view.type === 'budget' && (
-              <BudgetPanel budget={budget} onUpdate={handleBudgetChange} transactions={transactions} />
+              <BudgetPanel
+                budget={budget}
+                onUpdate={handleBudgetChange}
+                transactions={transactions}
+                categories={categories}
+              />
             )}
           </main>
         </div>
@@ -698,10 +703,12 @@ function BudgetPanel({
   budget,
   onUpdate,
   transactions,
+  categories,
 }: {
   budget: number;
   onUpdate: (value: number) => void;
   transactions: Transaction[];
+  categories: Category[];
 }) {
   const [value, setValue] = useState(budget);
   const [valueInput, setValueInput] = useState(budget ? String(budget) : '');
@@ -709,6 +716,27 @@ function BudgetPanel({
   const spent = transactions.reduce((sum, item) => sum + item.amount, 0);
   const remaining = Math.max(value - spent, 0);
   const percent = value > 0 ? Math.min((spent / value) * 100, 100) : 0;
+  const categoryMap = useMemo(() => new Map(categories.map((item) => [item._id, item])), [
+    categories,
+  ]);
+  const breakdown = useMemo(() => {
+    const totals = new Map<string, { name: string; color: string; total: number }>();
+
+    transactions.forEach((item) => {
+      if (item.amount <= 0 || !item.categoryId) return;
+      const category = categoryMap.get(item.categoryId);
+      if (!category) return;
+      const current = totals.get(item.categoryId);
+      totals.set(item.categoryId, {
+        name: category.name,
+        color: category.color,
+        total: (current?.total || 0) + item.amount,
+      });
+    });
+
+    return Array.from(totals.values()).sort((a, b) => b.total - a.total);
+  }, [transactions, categoryMap]);
+  const totalSpent = breakdown.reduce((sum, item) => sum + item.total, 0);
 
   useEffect(() => {
     setValue(budget);
@@ -718,11 +746,21 @@ function BudgetPanel({
   const parsedBudget = parsePositiveAmount(valueInput);
 
   return (
-    <section className="card-surface rounded-3xl p-6 shadow-float fade-in">
-      <h2 className="font-display text-2xl mb-2">Monthly Budget</h2>
-      <p className="text-sm text-slate-500 mb-6">Adjust anytime. We auto-track remaining funds.</p>
+    <section className="card-surface rounded-3xl p-6 shadow-float fade-in text-base">
+      <h2 className="font-display text-3xl mb-2">Monthly Budget</h2>
+      <p className="text-base text-slate-500 mb-6">Adjust anytime. We auto-track remaining funds.</p>
       <div className="flex items-center gap-3 mb-6">
         <input
+          className="border border-slate-200 rounded-lg px-3 py-2 w-48"
+          type="text"
+          inputMode="decimal"
+          placeholder="0"
+          value={value === 0 ? '' : value}
+          onChange={(e) => {
+            const next = e.target.value;
+            setValue(next === '' ? 0 : Number(next));
+          }}
+        />
           className="border border-slate-200 rounded-lg px-3 py-2 w-40"
           type="number"
           value={valueInput}
@@ -756,14 +794,79 @@ function BudgetPanel({
         </button>
       </div>
       <div className="bg-white/70 rounded-2xl p-5 border border-white/70">
-        <div className="flex items-center justify-between text-sm mb-2">
+        <div className="flex items-center justify-between text-base mb-2">
           <span>Spent: SGD {spent.toFixed(2)}</span>
           <span>Remaining: SGD {remaining.toFixed(2)}</span>
         </div>
         <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
           <div className="h-full bg-tide" style={{ width: `${percent}%` }} />
         </div>
-        <p className="text-xs text-slate-500 mt-2">{percent.toFixed(1)}% used</p>
+        <p className="text-sm text-slate-500 mt-2">{percent.toFixed(1)}% used</p>
+      </div>
+      <div className="bg-white/70 rounded-2xl p-5 border border-white/70 mt-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold">Spending by category</h3>
+          <span className="text-sm text-slate-500">Total SGD {totalSpent.toFixed(2)}</span>
+        </div>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+          <div className="relative w-72 h-72 shrink-0">
+            <svg viewBox="0 0 200 200" className="w-full h-full">
+              <circle cx="100" cy="100" r="90" fill="none" stroke="#e2e8f0" strokeWidth="22" />
+              {(() => {
+                const radius = 90;
+                const circumference = 2 * Math.PI * radius;
+                let offset = 0;
+                return breakdown.map((item) => {
+                  const sliceLength = totalSpent > 0 ? (item.total / totalSpent) * circumference : 0;
+                  const strokeDasharray = `${sliceLength} ${circumference - sliceLength}`;
+                  const circle = (
+                    <circle
+                      key={item.name}
+                      cx="100"
+                      cy="100"
+                      r={radius}
+                      fill="none"
+                      stroke={item.color}
+                      strokeWidth="22"
+                      strokeDasharray={strokeDasharray}
+                      strokeDashoffset={-offset}
+                      strokeLinecap="butt"
+                      transform="rotate(-90 100 100)"
+                    />
+                  );
+                  offset += sliceLength;
+                  return circle;
+                });
+              })()}
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center text-base font-semibold text-slate-600">
+              {totalSpent > 0 ? `${totalSpent.toFixed(2)} SGD` : 'No spend'}
+            </div>
+          </div>
+          <div className="flex-1 grid gap-2 text-base">
+            {breakdown.length === 0 ? (
+              <p className="text-slate-500">No categorized spending yet.</p>
+            ) : (
+              breakdown.map((item) => {
+                const share = totalSpent > 0 ? (item.total / totalSpent) * 100 : 0;
+                return (
+                  <div key={item.name} className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-3 w-3 rounded-full"
+                        style={{ backgroundColor: item.color }}
+                      />
+                      <span>{item.name}</span>
+                    </div>
+                    <div className="text-slate-500">
+                      {share.toFixed(1)}% · SGD {item.total.toFixed(2)}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
       </div>
     </section>
   );
