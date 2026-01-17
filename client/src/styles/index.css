@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  font-family: 'IBM Plex Sans', sans-serif;
+  background: radial-gradient(1200px 600px at 20% -10%, #fff2de 0%, rgba(255, 255, 255, 0) 70%),
+    radial-gradient(900px 500px at 90% 10%, #f9e6cf 0%, rgba(255, 255, 255, 0) 65%),
+    linear-gradient(180deg, #f7efe6 0%, #f4e3cf 100%);
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d8c6ae;
+  border-radius: 999px;
+}
+
+.card-surface {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  backdrop-filter: blur(8px);
+}
+
+.fade-in {
+  animation: fadeIn 0.4s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
