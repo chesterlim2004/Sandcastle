@@ -59,6 +59,10 @@ export async function deleteCategory(id: string) {
   await api.delete(`/api/categories/${id}`);
 }
 
+export async function reorderCategories(order: Array<{ id: string; order: number }>) {
+  await api.post('/api/categories/reorder', { order });
+}
+
 export async function fetchTransactions(categoryId: string | 'unsorted' | null) {
   const params = categoryId ? { categoryId } : undefined;
   const res = await api.get('/api/transactions', { params });
