@@ -104,12 +104,15 @@ export async function moveTransaction(id: string, categoryId: string | null) {
 
 export async function fetchBudget() {
   const res = await api.get('/api/budget');
-  return res.data.budget as { monthlyTotal: number };
+  return res.data.budget as { monthlyTotal: number; categoryCaps?: Record<string, number> };
 }
 
-export async function updateBudget(monthlyTotal: number) {
-  const res = await api.put('/api/budget', { monthlyTotal });
-  return res.data.budget as { monthlyTotal: number };
+export async function updateBudget(payload: {
+  monthlyTotal?: number;
+  categoryCaps?: Record<string, number>;
+}) {
+  const res = await api.put('/api/budget', payload);
+  return res.data.budget as { monthlyTotal: number; categoryCaps?: Record<string, number> };
 }
 
 export async function importGmail() {
