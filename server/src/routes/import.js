@@ -16,13 +16,27 @@ const limiter = rateLimit({
 router.post('/', limiter, async (req, res) => {
   const gmail = getGmailClient(req.user);
 
-  const list = await gmail.users.messages.list({
-    userId: 'me',
-    q: '(PayNow OR PayLah) newer_than:30d',
-    maxResults: 25,
-  });
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const monthStartQuery = `${monthStart.getFullYear()}/${String(
+    monthStart.getMonth() + 1
+  ).padStart(2, '0')}/${String(monthStart.getDate()).padStart(2, '0')}`;
+  const query = `(PayNow OR PayLah) after:${monthStartQuery}`;
 
-  const messages = list.data.messages || [];
+  const messages = [];
+  let pageToken = undefined;
+  do {
+    const list = await gmail.users.messages.list({
+      userId: 'me',
+      q: query,
+      maxResults: 500,
+      pageToken,
+    });
+    const batch = list.data.messages || [];
+    messages.push(...batch);
+    pageToken = list.data.nextPageToken;
+  } while (pageToken);
   const imported = [];
 
   for (const msg of messages) {
@@ -31,6 +45,11 @@ router.post('/', limiter, async (req, res) => {
     if (!parsed || !parsed.amount) {
       continue;
     }
+    console.log('[Sandcastle][Gmail Import] content amount', {
+      messageId: parsed.messageId,
+      name: parsed.name,
+      amount: parsed.amount,
+    });
     imported.push(parsed);
   }
 
