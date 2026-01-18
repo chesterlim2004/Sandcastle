@@ -268,7 +268,7 @@ function App() {
 
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-      <div className="min-h-screen flex">
+      <div className="min-h-screen flex flex-col">
         {toasts.length > 0 && (
           <div className="fixed top-6 right-6 z-50 flex flex-col gap-2">
             {toasts.map((toast) => (
@@ -281,22 +281,28 @@ function App() {
             ))}
           </div>
         )}
-        <Sidebar
-          user={user}
-          categories={categories}
-          view={view}
-          onViewChange={setView}
-          onAdd={() => setComposeOpen(true)}
-          onAddCategory={openCategoryComposer}
-        />
-        <div className="flex-1 flex flex-col">
+        <div className="sticky top-0 z-40">
           <Topbar
             user={user}
             onLogout={handleLogout}
             onDisconnect={disconnectGmail}
             onDeleteData={deleteMyData}
           />
-          <main className="flex-1 p-8">
+        </div>
+        <div className="flex flex-1">
+          <div className="relative w-72 ml-6">
+            <div className="fixed top-[88px] left-6 z-30">
+              <Sidebar
+                user={user}
+                categories={categories}
+                view={view}
+                onViewChange={setView}
+                onAdd={() => setComposeOpen(true)}
+                onAddCategory={openCategoryComposer}
+              />
+            </div>
+          </div>
+          <main className="flex-1 px-8 pb-8 pt-6">
             {view.type === 'unsorted' && (
               <TransactionPanel
                 title="Unsorted"
@@ -326,7 +332,6 @@ function App() {
                 onDelete={handleDeleteCategory}
                 onPreview={handlePreviewCategory}
                 createOpen={isCategoryComposerOpen}
-                onOpenCreate={() => setCategoryComposerOpen(true)}
                 onCloseCreate={() => setCategoryComposerOpen(false)}
               />
             )}
@@ -376,7 +381,7 @@ function Topbar({
   return (
     <header className="flex items-center justify-between px-8 py-5 border-b border-white/60 backdrop-blur">
       <div>
-        <h1 className="font-display text-2xl">Sandcastle</h1>
+        <h1 className="font-display text-3xl">Sandcastle</h1>
         <p className="text-sm text-slate-500">Automated budget tracking</p>
       </div>
       <div className="flex items-center gap-4">
@@ -433,28 +438,25 @@ function Sidebar({
   onAddCategory: () => void;
 }) {
   return (
-    <aside className="w-72 p-6 border-r border-white/50 flex flex-col gap-6">
+    <aside className="w-72 h-[calc(100vh-88px)] py-6 pr-6 border-r border-white/50 flex flex-col gap-6">
       <button
         className="bg-coral text-white rounded-2xl py-3 text-center font-semibold shadow-float"
         onClick={onAdd}
       >
         Add Transaction
       </button>
-      <div className="space-y-3">
-        <SidebarItem
+      <div className="space-y-3 pl-3">
+        <SectionTabButton
           label="Unsorted"
-          active={view.type === 'unsorted'}
           onClick={() => onViewChange({ type: 'unsorted' })}
           droppableId="category-unsorted"
         />
         <div className="mt-4">
-          <button
-            className="text-xs uppercase tracking-[0.2em] text-slate-500"
+          <SectionTabButton
+            label="Categories"
             onClick={() => onViewChange({ type: 'categories' })}
-          >
-            Categories
-          </button>
-        <div className="mt-3 space-y-2">
+          />
+          <div className="mt-3 space-y-2">
             <SortableContext
               items={categories.map((category) => `category-${category._id}`)}
               strategy={verticalListSortingStrategy}
@@ -469,20 +471,19 @@ function Sidebar({
               ))}
             </SortableContext>
             <button
-              className="text-sm text-slate-500 hover:text-slate-700"
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left text-sm text-slate-500 hover:text-slate-700 hover:bg-white/60"
               onClick={onAddCategory}
             >
-              + Add category
+              <span className="h-2.5 w-2.5 rounded-full border border-slate-300" />
+              <span>+ Add category</span>
             </button>
           </div>
         </div>
-        <SidebarItem
-          label="Budgeting"
-          active={view.type === 'budget'}
-          onClick={() => onViewChange({ type: 'budget' })}
-        />
+        <SectionTabButton label="Budgeting" onClick={() => onViewChange({ type: 'budget' })} />
       </div>
-      <div className="mt-auto text-xs text-slate-500">Signed in as {user.email}</div>
+      <div className="mt-auto text-xs text-slate-500">
+        Signed in as {user.email}
+      </div>
     </aside>
   );
 }
@@ -517,6 +518,31 @@ function SidebarItem({
       </button>
     </Droppable>
   );
+}
+
+function SectionTabButton({
+  label,
+  onClick,
+  droppableId,
+}: {
+  label: string;
+  onClick: () => void;
+  droppableId?: string;
+}) {
+  const content = (
+    <button
+      className="text-base uppercase tracking-[0.2em] text-slate-500 hover:text-slate-700"
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+
+  if (droppableId) {
+    return <Droppable id={droppableId}>{content}</Droppable>;
+  }
+
+  return content;
 }
 
 function SortableCategoryItem({
@@ -708,7 +734,6 @@ function CategoryManager({
   onDelete,
   onPreview,
   createOpen,
-  onOpenCreate,
   onCloseCreate,
 }: {
   categories: Category[];
@@ -717,14 +742,15 @@ function CategoryManager({
   onDelete: (id: string) => void;
   onPreview: (id: string, payload: Partial<Category>) => void;
   createOpen: boolean;
-  onOpenCreate: () => void;
   onCloseCreate: () => void;
 }) {
   const [draft, setDraft] = useState({ name: '', color: '#e66b4f' });
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (createOpen) {
       setDraft({ name: '', color: '#e66b4f' });
+      nameInputRef.current?.focus();
     }
   }, [createOpen]);
 
@@ -735,18 +761,13 @@ function CategoryManager({
           <h2 className="font-display text-2xl">Category Management</h2>
           <p className="text-sm text-slate-500">Rename, recolor, or clean up categories.</p>
         </div>
-        <button
-          className="px-4 py-2 rounded-full border border-slate-300 text-sm"
-          onClick={onOpenCreate}
-        >
-          Add Category
-        </button>
       </div>
       {createOpen && (
         <div className="bg-white/80 rounded-2xl p-4 border border-white/70 mb-6">
           <div className="grid md:grid-cols-[2fr_1fr_auto] gap-3 items-center">
             <input
-              className="border border-slate-200 rounded-lg px-3 py-2"
+              ref={nameInputRef}
+              className="border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-tide/40 focus:outline-none"
               placeholder="Category name"
               value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
@@ -766,7 +787,7 @@ function CategoryManager({
                   onCloseCreate();
                 }}
               >
-                Save
+                Add Category
               </button>
               <button
                 className="px-3 py-2 rounded-full border border-slate-300 text-sm"
