@@ -33,6 +33,7 @@ import {
   getLoginUrl,
   importGmail,
   logout,
+  deleteTransaction,
   moveTransaction,
   reorderCategories,
   updateBudget,
@@ -77,6 +78,8 @@ function App() {
   const [isComposeOpen, setComposeOpen] = useState(false);
   const [isCategoryComposerOpen, setCategoryComposerOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<Transaction | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [toasts, setToasts] = useState<{ id: number; message: string }[]>([]);
   const toastIdRef = useRef(0);
 
@@ -220,6 +223,16 @@ function App() {
     return updated;
   };
 
+  const handleDeleteTransaction = async (id: string) => {
+    await deleteTransaction(id);
+    setTransactions((prev) => prev.filter((item) => item._id !== id));
+    pushToast('Transaction deleted.');
+  };
+
+  const handleRequestDelete = (txn: Transaction) => {
+    setDeleteConfirm(txn);
+  };
+
   const handleImport = async () => {
     setImporting(true);
     try {
@@ -270,7 +283,7 @@ function App() {
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       <div className="min-h-screen flex flex-col">
         {toasts.length > 0 && (
-          <div className="fixed top-6 right-6 z-50 flex flex-col gap-2">
+          <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2">
             {toasts.map((toast) => (
               <div
                 key={toast.id}
@@ -309,6 +322,7 @@ function App() {
                 subtitle="Recent Gmail imports live here until you categorize them."
                 transactions={transactions}
                 onUpdate={handleUpdateTransaction}
+                onRequestDelete={handleRequestDelete}
                 onImport={handleImport}
                 importing={importing}
               />
@@ -319,6 +333,7 @@ function App() {
                 subtitle="Drag items here from Unsorted or edit inline."
                 transactions={transactions}
                 onUpdate={handleUpdateTransaction}
+                onRequestDelete={handleRequestDelete}
               />
             )}
             {view.type === 'categories' && (
@@ -361,6 +376,40 @@ function App() {
               setComposeOpen(false);
             }}
           />
+        )}
+        {deleteConfirm && (
+          <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50">
+            <div className="bg-black text-white rounded-2xl shadow-xl px-5 py-4 min-w-[320px]">
+              <p className="text-sm font-semibold">Delete transaction?</p>
+              <p className="text-sm opacity-90 mt-1">
+                This action cannot be undone.
+              </p>
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button
+                  className="px-3 py-1.5 rounded-full border border-white/60 text-white/90"
+                  onClick={() => setDeleteConfirm(null)}
+                  disabled={isDeleting}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="px-3 py-1.5 rounded-full bg-white text-black font-semibold"
+                  disabled={isDeleting}
+                  onClick={async () => {
+                    setIsDeleting(true);
+                    try {
+                      await handleDeleteTransaction(deleteConfirm._id);
+                      setDeleteConfirm(null);
+                    } finally {
+                      setIsDeleting(false);
+                    }
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </DndContext>
@@ -591,6 +640,7 @@ function TransactionPanel({
   subtitle,
   transactions,
   onUpdate,
+  onRequestDelete,
   onImport,
   importing,
 }: {
@@ -598,6 +648,7 @@ function TransactionPanel({
   subtitle: string;
   transactions: Transaction[];
   onUpdate: (id: string, payload: Partial<Transaction>) => Promise<Transaction>;
+  onRequestDelete: (txn: Transaction) => void;
   onImport?: () => void;
   importing?: boolean;
 }) {
@@ -623,7 +674,12 @@ function TransactionPanel({
           <p className="text-sm text-slate-500">No transactions yet.</p>
         )}
         {transactions.map((txn) => (
-          <TransactionRow key={txn._id} txn={txn} onUpdate={onUpdate} />
+          <TransactionRow
+            key={txn._id}
+            txn={txn}
+            onUpdate={onUpdate}
+            onRequestDelete={onRequestDelete}
+          />
         ))}
       </div>
     </section>
@@ -633,9 +689,11 @@ function TransactionPanel({
 function TransactionRow({
   txn,
   onUpdate,
+  onRequestDelete,
 }: {
   txn: Transaction;
   onUpdate: (id: string, payload: Partial<Transaction>) => Promise<Transaction>;
+  onRequestDelete: (txn: Transaction) => void;
 }) {
   const [local, setLocal] = useState(txn);
   const [amountInput, setAmountInput] = useState(String(txn.amount));
@@ -660,7 +718,20 @@ function TransactionRow({
 
   return (
     <Draggable id={`txn-${txn._id}`}>
-      <div className="bg-white/80 rounded-2xl p-4 flex flex-col gap-3 border border-slate-300/80">
+      <div className="bg-white/80 rounded-2xl p-4 flex flex-col gap-3 border border-slate-300/80 relative">
+        <button
+          type="button"
+          className="absolute top-3 right-3 p-2 rounded-full border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-white/70"
+          aria-label="Delete transaction"
+          onClick={() => onRequestDelete(txn)}
+        >
+          <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+            <path
+              d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM6 7h12l-1 13a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 7z"
+              fill="currentColor"
+            />
+          </svg>
+        </button>
         <div className="grid md:grid-cols-[2fr_1fr_1fr_1fr] gap-3">
           <input
             className="border border-slate-200 rounded-lg px-3 py-2"
