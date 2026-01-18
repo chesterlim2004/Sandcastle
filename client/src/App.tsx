@@ -291,7 +291,7 @@ function App() {
 
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-      <div className="min-h-screen flex flex-col">
+      <div className="min-h-screen flex flex-col pt-[88px]">
         {toasts.length > 0 && (
           <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2">
             {toasts.map((toast) => (
@@ -304,7 +304,7 @@ function App() {
             ))}
           </div>
         )}
-        <div className="sticky top-0 z-40">
+        <div className="fixed top-0 left-0 right-0 z-40">
           <Topbar
             user={user}
             onLogout={handleLogout}
