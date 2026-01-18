@@ -6,17 +6,29 @@ const router = Router();
 
 router.get('/', async (req, res) => {
   const budget = await Budget.findOne({ userId: req.user._id });
-  res.json({ budget: budget || { monthlyTotal: 0 } });
+  res.json({ budget: budget || { monthlyTotal: 0, categoryCaps: {} } });
 });
 
 router.put('/', async (req, res) => {
-  const parsed = z.object({ monthlyTotal: z.number().min(0) }).safeParse(req.body);
+  const parsed = z
+    .object({
+      monthlyTotal: z.number().min(0).optional(),
+      categoryCaps: z.record(z.number().min(0)).optional(),
+    })
+    .safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: 'Invalid payload' });
   }
+  const updates = {};
+  if (parsed.data.monthlyTotal !== undefined) {
+    updates.monthlyTotal = parsed.data.monthlyTotal;
+  }
+  if (parsed.data.categoryCaps !== undefined) {
+    updates.categoryCaps = parsed.data.categoryCaps;
+  }
   const budget = await Budget.findOneAndUpdate(
     { userId: req.user._id },
-    { $set: { monthlyTotal: parsed.data.monthlyTotal } },
+    { $set: updates },
     { upsert: true, new: true }
   );
   res.json({ budget });

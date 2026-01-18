@@ -112,6 +112,14 @@ function App() {
         const [cats, budgetData] = await Promise.all([fetchCategories(), fetchBudget()]);
         setCategories(cats);
         setBudget(budgetData.monthlyTotal || 0);
+        if (budgetData.categoryCaps) {
+          setCategoryCaps(budgetData.categoryCaps);
+          setCapInputs(
+            Object.fromEntries(
+              Object.entries(budgetData.categoryCaps).map(([id, value]) => [id, String(value)])
+            )
+          );
+        }
       } catch (err) {
         setUser(null);
       } finally {
@@ -209,8 +217,13 @@ function App() {
   };
 
   const handleBudgetChange = async (value: number) => {
-    const updated = await updateBudget(value);
+    const updated = await updateBudget({ monthlyTotal: value });
     setBudget(updated.monthlyTotal || 0);
+  };
+
+  const handleCapsUpdate = async (caps: Record<string, number>) => {
+    const updated = await updateBudget({ categoryCaps: caps });
+    setCategoryCaps(updated.categoryCaps || {});
   };
 
   const handleUpdateTransaction = async (id: string, payload: Partial<Transaction>) => {
@@ -369,6 +382,7 @@ function App() {
                 categoryCaps={categoryCaps}
                 setCategoryCaps={setCategoryCaps}
                 capInputs={capInputs}
+                onUpdateCaps={handleCapsUpdate}
                 setCapInputs={setCapInputs}
               />
             )}
@@ -967,6 +981,7 @@ function BudgetPanel({
   categoryCaps,
   setCategoryCaps,
   capInputs,
+  onUpdateCaps,
   setCapInputs,
 }: {
   budget: number;
@@ -976,6 +991,7 @@ function BudgetPanel({
   categoryCaps: Record<string, number>;
   setCategoryCaps: Dispatch<SetStateAction<Record<string, number>>>;
   capInputs: Record<string, string>;
+  onUpdateCaps: (caps: Record<string, number>) => void;
   setCapInputs: Dispatch<SetStateAction<Record<string, string>>>;
 }) {
   const [value, setValue] = useState(budget);
@@ -1170,6 +1186,7 @@ function BudgetPanel({
                   });
                   setCategoryCaps(nextCaps);
                   setCapInputs(nextInputs);
+                  onUpdateCaps(nextCaps);
                 }}
               >
                 Update caps
@@ -1185,6 +1202,7 @@ function BudgetPanel({
                     });
                     return next;
                   });
+                  onUpdateCaps({});
                 }}
               >
                 Reset caps
