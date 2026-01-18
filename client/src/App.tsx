@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type KeyboardEvent,
+  type SetStateAction,
+} from 'react';
 import {
   DndContext,
   DragEndEvent,
@@ -74,6 +82,8 @@ function App() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [budget, setBudget] = useState(0);
+  const [categoryCaps, setCategoryCaps] = useState<Record<string, number>>({});
+  const [capInputs, setCapInputs] = useState<Record<string, string>>({});
   const [view, setView] = useState<ViewState>({ type: 'unsorted' });
   const [isComposeOpen, setComposeOpen] = useState(false);
   const [isCategoryComposerOpen, setCategoryComposerOpen] = useState(false);
@@ -356,6 +366,10 @@ function App() {
                 onUpdate={handleBudgetChange}
                 transactions={transactions}
                 categories={categories}
+                categoryCaps={categoryCaps}
+                setCategoryCaps={setCategoryCaps}
+                capInputs={capInputs}
+                setCapInputs={setCapInputs}
               />
             )}
           </main>
@@ -950,32 +964,65 @@ function BudgetPanel({
   onUpdate,
   transactions,
   categories,
+  categoryCaps,
+  setCategoryCaps,
+  capInputs,
+  setCapInputs,
 }: {
   budget: number;
   onUpdate: (value: number) => void;
   transactions: Transaction[];
   categories: Category[];
+  categoryCaps: Record<string, number>;
+  setCategoryCaps: Dispatch<SetStateAction<Record<string, number>>>;
+  capInputs: Record<string, string>;
+  setCapInputs: Dispatch<SetStateAction<Record<string, string>>>;
 }) {
   const [value, setValue] = useState(budget);
   const [valueInput, setValueInput] = useState(budget ? String(budget) : '');
+  const [showCaps, setShowCaps] = useState(false);
 
   const spent = transactions.reduce((sum, item) => sum + item.amount, 0);
   const remaining = Math.max(value - spent, 0);
-  const percent = value > 0 ? Math.min((spent / value) * 100, 100) : 0;
+  const hasBudget = value > 0;
+  const percent = hasBudget ? (spent / value) * 100 : 0;
+  const exceededBy = hasBudget && spent > value ? spent - value : 0;
+  const meterPercent = Math.min(percent, 100);
+  const budgetReminder = hasBudget
+    ? percent >= 50 && percent < 70
+      ? `You've used ${percent.toFixed(
+          1
+        )}% of this month's budget. Spending is on track - keep an eye on higher-spend categories.`
+      : percent >= 70 && percent < 80
+        ? 'You are approaching your monthly budget. You may want to reduce spending to keep within budget.'
+        : percent >= 80 && percent <= 100
+          ? `You are close to your budget limit. Only SGD ${remaining.toFixed(
+              2
+            )} left for the rest of the month.`
+          : ''
+    : '';
   const categoryMap = useMemo(() => new Map(categories.map((item) => [item._id, item])), [
     categories,
   ]);
+  const categorySpend = useMemo(() => {
+    const totals = new Map<string, number>();
+    transactions.forEach((item) => {
+      if (!item.categoryId || item.amount <= 0) return;
+      totals.set(item.categoryId, (totals.get(item.categoryId) || 0) + item.amount);
+    });
+    return totals;
+  }, [transactions]);
   const breakdown = useMemo(() => {
     const totals = new Map<string, { name: string; color: string; total: number }>();
 
     transactions.forEach((item) => {
-      if (item.amount <= 0 || !item.categoryId) return;
-      const category = categoryMap.get(item.categoryId);
-      if (!category) return;
-      const current = totals.get(item.categoryId);
-      totals.set(item.categoryId, {
-        name: category.name,
-        color: category.color,
+      if (item.amount <= 0) return;
+      const categoryId = item.categoryId ?? 'unsorted';
+      const category = categoryMap.get(categoryId);
+      const current = totals.get(categoryId);
+      totals.set(categoryId, {
+        name: category?.name || 'Unsorted',
+        color: category?.color || '#94a3b8',
         total: (current?.total || 0) + item.amount,
       });
     });
@@ -989,6 +1036,32 @@ function BudgetPanel({
     setValueInput(budget ? String(budget) : '');
   }, [budget]);
 
+  useEffect(() => {
+    setCapInputs((prev) => {
+      const next = { ...prev };
+      categories.forEach((category) => {
+        if (next[category._id] === undefined) {
+          next[category._id] = '';
+        }
+      });
+      Object.keys(next).forEach((id) => {
+        if (!categoryMap.has(id)) {
+          delete next[id];
+        }
+      });
+      return next;
+    });
+    setCategoryCaps((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((id) => {
+        if (!categoryMap.has(id)) {
+          delete next[id];
+        }
+      });
+      return next;
+    });
+  }, [categories, categoryMap]);
+
   const parsedBudget = parsePositiveAmount(valueInput);
 
   return (
@@ -1001,50 +1074,163 @@ function BudgetPanel({
           type="number"
           value={valueInput}
           inputMode="decimal"
+          placeholder="0"
           min="0.01"
           step="0.01"
           onChange={(e) => {
             const nextValue = e.target.value;
             if (!isAmountDraft(nextValue)) return;
             setValueInput(nextValue);
-            const parsed = parsePositiveAmount(nextValue);
-            if (parsed !== null) {
-              setValue(parsed);
-            }
           }}
           onBlur={() => {
             if (parsedBudget === null) {
               setValueInput(value ? String(value) : '');
               return;
             }
-            setValue(parsedBudget);
             setValueInput(String(parsedBudget));
           }}
         />
         <button
           className="px-4 py-2 rounded-full bg-leaf text-white text-sm"
-          onClick={() => onUpdate(value)}
+          onClick={() => {
+            if (parsedBudget === null) return;
+            onUpdate(parsedBudget);
+          }}
           disabled={parsedBudget === null}
         >
           Update budget
         </button>
+        <button
+          className="px-4 py-2 rounded-full border border-slate-300 text-sm"
+          onClick={() => {
+            setValue(0);
+            setValueInput('');
+            onUpdate(0);
+          }}
+        >
+          Reset
+        </button>
       </div>
       <div className="bg-white/70 rounded-2xl p-5 border border-white/70">
-        <div className="flex items-center justify-between text-base mb-2">
+        <div className="flex items-center justify-between text-lg mb-2">
           <span>Spent: SGD {spent.toFixed(2)}</span>
-          <span>Remaining: SGD {remaining.toFixed(2)}</span>
+          <span>
+            {!hasBudget
+              ? 'No budget provided.'
+              : exceededBy > 0
+                ? 'Budget exceeded by '
+                : `Remaining: SGD ${remaining.toFixed(2)}`}
+            {exceededBy > 0 && (
+              <span className="text-rose-600">SGD {exceededBy.toFixed(2)}</span>
+            )}
+          </span>
         </div>
         <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
-          <div className="h-full bg-tide" style={{ width: `${percent}%` }} />
+          <div
+            className={clsx('h-full', exceededBy > 0 ? 'bg-rose-500' : 'bg-tide')}
+            style={{ width: `${meterPercent}%` }}
+          />
         </div>
         <p className="text-sm text-slate-500 mt-2">{percent.toFixed(1)}% used</p>
+        {budgetReminder && (
+          <p className="text-sm text-slate-600 mt-2">{budgetReminder}</p>
+        )}
+      </div>
+      <div className="bg-white/70 rounded-2xl p-5 border border-white/70 mt-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold">Budget Caps by Category (Optional)</h3>
+            <p className="text-sm text-slate-500">
+              Set spending limits for each category to stay on track and avoid overspending!
+            </p>
+          </div>
+          <button
+            className="px-4 py-2 rounded-full border border-slate-300 text-sm"
+            onClick={() => setShowCaps((prev) => !prev)}
+          >
+            {showCaps ? 'Hide caps' : 'Set caps'}
+          </button>
+        </div>
+        {showCaps && (
+          <div className="mt-4">
+            <div className="flex items-center justify-end gap-2 mb-3">
+              <button
+                className="px-3 py-1.5 rounded-full bg-leaf text-white text-xs"
+                onClick={() => {
+                  const nextCaps: Record<string, number> = {};
+                  const nextInputs = { ...capInputs };
+                  categories.forEach((category) => {
+                    const rawValue = nextInputs[category._id] ?? '';
+                    if (rawValue === '') return;
+                    const parsed = parsePositiveAmount(rawValue);
+                    if (parsed !== null) {
+                      nextCaps[category._id] = parsed;
+                      nextInputs[category._id] = String(parsed);
+                    }
+                  });
+                  setCategoryCaps(nextCaps);
+                  setCapInputs(nextInputs);
+                }}
+              >
+                Update caps
+              </button>
+              <button
+                className="px-3 py-1.5 rounded-full border border-slate-300 text-xs"
+                onClick={() => {
+                  setCategoryCaps({});
+                  setCapInputs((prev) => {
+                    const next = { ...prev };
+                    Object.keys(next).forEach((key) => {
+                      next[key] = '';
+                    });
+                    return next;
+                  });
+                }}
+              >
+                Reset caps
+              </button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {categories.map((category) => {
+                const currentInput = capInputs[category._id] ?? '';
+                const currentCap = categoryCaps[category._id];
+                return (
+                  <label key={category._id} className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium text-base">{category.name}</span>
+                    <input
+                      className="border border-slate-200 rounded-lg px-3 py-2"
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0"
+                      value={currentInput}
+                      onChange={(e) => {
+                        const nextValue = e.target.value;
+                        if (!isAmountDraft(nextValue)) return;
+                        setCapInputs((prev) => ({ ...prev, [category._id]: nextValue }));
+                      }}
+                      onBlur={() => {
+                        const parsed = parsePositiveAmount(currentInput);
+                        if (parsed !== null) {
+                          setCapInputs((prev) => ({ ...prev, [category._id]: String(parsed) }));
+                          return;
+                        }
+                        const fallback = currentCap ? String(currentCap) : '';
+                        setCapInputs((prev) => ({ ...prev, [category._id]: fallback }));
+                      }}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
       <div className="bg-white/70 rounded-2xl p-5 border border-white/70 mt-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold">Spending by category</h3>
+          <h3 className="text-lg font-semibold">Spending by Category</h3>
           <span className="text-sm text-slate-500">Total SGD {totalSpent.toFixed(2)}</span>
         </div>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:gap-10">
           <div className="relative w-72 h-72 shrink-0">
             <svg viewBox="0 0 200 200" className="w-full h-full">
               <circle cx="100" cy="100" r="90" fill="none" stroke="#e2e8f0" strokeWidth="22" />
@@ -1076,7 +1262,7 @@ function BudgetPanel({
               })()}
             </svg>
             <div className="absolute inset-0 flex items-center justify-center text-base font-semibold text-slate-600">
-              {totalSpent > 0 ? `${totalSpent.toFixed(2)} SGD` : 'No spend'}
+              {totalSpent > 0 ? `SGD ${totalSpent.toFixed(2)}` : 'No spend'}
             </div>
           </div>
           <div className="flex-1 grid gap-2 text-base">
@@ -1086,17 +1272,15 @@ function BudgetPanel({
               breakdown.map((item) => {
                 const share = totalSpent > 0 ? (item.total / totalSpent) * 100 : 0;
                 return (
-                  <div key={item.name} className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="h-3 w-3 rounded-full"
-                        style={{ backgroundColor: item.color }}
-                      />
-                      <span>{item.name}</span>
-                    </div>
-                    <div className="text-slate-500">
+                  <div key={item.name} className="flex items-center gap-3">
+                    <span
+                      className="h-3 w-3 rounded-full"
+                      style={{ backgroundColor: item.color }}
+                    />
+                    <span>{item.name}</span>
+                    <span className="text-slate-500">
                       {share.toFixed(1)}% · SGD {item.total.toFixed(2)}
-                    </div>
+                    </span>
                   </div>
                 );
               })
@@ -1104,6 +1288,64 @@ function BudgetPanel({
           </div>
         </div>
       </div>
+      {Object.keys(categoryCaps).length > 0 && (
+        <div className="bg-white/70 rounded-2xl p-5 border border-white/70 mt-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Category Budget Progress</h3>
+            <div className="flex items-center gap-3 text-sm text-slate-500">
+              <span>Based on caps</span>
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  &lt; 60%
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-amber-400" />
+                  60–80%
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-rose-500" />
+                  ≥ 80%
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="space-y-4">
+            {categories
+              .filter((category) => categoryCaps[category._id])
+              .map((category) => {
+                const cap = categoryCaps[category._id];
+                const spentForCategory = categorySpend.get(category._id) || 0;
+                const capPercent = cap > 0 ? (spentForCategory / cap) * 100 : 0;
+                const barPercent = Math.min(capPercent, 100);
+                const overCap = capPercent > 100;
+                const barColor =
+                  capPercent < 60
+                    ? 'bg-emerald-500'
+                    : capPercent < 80
+                      ? 'bg-amber-400'
+                      : 'bg-rose-500';
+                return (
+                  <div key={category._id} className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-base">{category.name}</span>
+                      <span className={clsx(overCap && 'text-rose-600')}>
+                        SGD {spentForCategory.toFixed(2)} / {cap.toFixed(2)} ({capPercent.toFixed(1)}
+                        %)
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                      <div
+                        className={clsx('h-full', barColor)}
+                        style={{ width: `${barPercent}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
