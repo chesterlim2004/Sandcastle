@@ -1362,7 +1362,7 @@ function ComposeModal({
   const [form, setForm] = useState({
     name: '',
     amount: '',
-    occurredAt: new Date().toISOString().slice(0, 16),
+    occurredAt: toLocalDatetimeInput(new Date()),
     categoryId: '',
   });
 
